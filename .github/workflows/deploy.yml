@@ -32,7 +32,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Typecheck and build
         env:
@@ -46,6 +46,18 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           DEEPSEEK_MODEL: deepseek-chat
           DEEPSEEK_BASE_URL: https://api.deepseek.com
+          AUTOMATION_ENABLED: "true"
+          AUTOMATION_POLL_SECONDS: "60"
+          AUTOMATION_APP_HEALTH_URL: http://127.0.0.1:4010/login
+          TIMEZONE: Asia/Dhaka
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          EMAIL_HOST: ${{ secrets.EMAIL_HOST }}
+          EMAIL_PORT: ${{ secrets.EMAIL_PORT }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          GOOGLE_DRIVE_ENABLED: "false"
           NEXT_TELEMETRY_DISABLED: "1"
         run: |
           npm run typecheck
@@ -63,23 +75,44 @@ jobs:
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          EMAIL_HOST: ${{ secrets.EMAIL_HOST }}
+          EMAIL_PORT: ${{ secrets.EMAIL_PORT }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
         run: |
           {
             printf 'DATABASE_URL="%s"\n' "$DATABASE_URL"
             printf 'ADMIN_USERNAME="%s"\n' "$ADMIN_USERNAME"
             printf 'ADMIN_PASSWORD="%s"\n' "$ADMIN_PASSWORD"
             printf 'AUTH_SECRET="%s"\n' "$AUTH_SECRET"
+
             printf 'MYPLAN_UPLOAD_DIR="storage/uploads"\n'
             printf 'MAX_UPLOAD_MB="200"\n'
             printf 'NEXT_PUBLIC_APP_URL="%s"\n' "$NEXT_PUBLIC_APP_URL"
+
             printf 'DEEPSEEK_API_KEY="%s"\n' "$DEEPSEEK_API_KEY"
             printf 'DEEPSEEK_MODEL="deepseek-chat"\n'
             printf 'DEEPSEEK_BASE_URL="https://api.deepseek.com"\n'
-            printf 'NEXT_TELEMETRY_DISABLED="1"\n'
+
             printf 'AUTOMATION_ENABLED="true"\n'
             printf 'AUTOMATION_POLL_SECONDS="60"\n'
             printf 'AUTOMATION_APP_HEALTH_URL="http://127.0.0.1:4010/login"\n'
             printf 'TIMEZONE="Asia/Dhaka"\n'
+
+            printf 'TELEGRAM_BOT_TOKEN="%s"\n' "$TELEGRAM_BOT_TOKEN"
+            printf 'TELEGRAM_CHAT_ID="%s"\n' "$TELEGRAM_CHAT_ID"
+
+            printf 'EMAIL_HOST="%s"\n' "$EMAIL_HOST"
+            printf 'EMAIL_PORT="%s"\n' "$EMAIL_PORT"
+            printf 'EMAIL_USER="%s"\n' "$EMAIL_USER"
+            printf 'EMAIL_PASS="%s"\n' "$EMAIL_PASS"
+            printf 'EMAIL_TO="%s"\n' "$EMAIL_TO"
+
+            printf 'GOOGLE_DRIVE_ENABLED="false"\n'
+            printf 'NEXT_TELEMETRY_DISABLED="1"\n'
           } > .env.production
 
       - name: Prepare VPS folders
@@ -108,6 +141,7 @@ jobs:
             --exclude ".env" \
             --exclude ".env.local" \
             --exclude ".env.production" \
+            --exclude ".venv-automation" \
             --exclude "storage/uploads" \
             -e "ssh -o StrictHostKeyChecking=no" \
             ./ "$VPS_USER@$VPS_HOST:$APP_DIR/"
@@ -121,7 +155,7 @@ jobs:
           sshpass -p "$VPS_PASSWORD" scp -o StrictHostKeyChecking=no \
             .env.production "$VPS_USER@$VPS_HOST:$SHARED_DIR/.env.production"
 
-      - name: Install, build, init DB, and restart PM2
+      - name: Install, build, init DB, setup Python worker, and restart PM2
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
@@ -130,28 +164,36 @@ jobs:
           sshpass -p "$VPS_PASSWORD" ssh -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" "
             set -e
 
+            export DEBIAN_FRONTEND=noninteractive
+
             cd '$APP_DIR'
 
             cp '$SHARED_DIR/.env.production' .env.production
             cp '$SHARED_DIR/.env.production' .env.local
 
+            apt-get update
+            apt-get install -y python3 python3-pip python3-full python3.12-venv
+
             mkdir -p storage/uploads
-            if ! python3 -m venv --help >/dev/null 2>&1; then
-              apt-get update
-              apt-get install -y python3 python3-venv python3-pip
-            fi
-            npm ci
+            mkdir -p '$SHARED_DIR/logs'
+            mkdir -p '$SHARED_DIR/storage/uploads'
+
+            npm install
             npm run db:init
+
             rm -rf .next
             npm run build
 
+            rm -rf .venv-automation
             python3 -m venv .venv-automation
             . .venv-automation/bin/activate
             pip install --upgrade pip
             pip install -r automation/requirements.txt
+            deactivate
 
             pm2 delete my-plan-project || true
             pm2 delete my-plan-automation || true
+
             pm2 start ecosystem.config.cjs --update-env
             pm2 save
           "
@@ -163,7 +205,7 @@ jobs:
           VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
         run: |
           sshpass -p "$VPS_PASSWORD" ssh -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" "
-            sleep 5
+            sleep 8
             curl -I http://127.0.0.1:$APP_PORT
             pm2 status
           "
