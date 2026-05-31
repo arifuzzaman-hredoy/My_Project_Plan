@@ -5,6 +5,17 @@ on:
     branches:
       - main
 
+concurrency:
+  group: deploy-my-plan-project
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "24"
+  APP_DIR: "/var/www/my-plan-project/current"
+  SHARED_DIR: "/var/www/my-plan-project/shared"
+  APP_PORT: "4010"
+  NEXT_PUBLIC_APP_URL: "https://mynextplan.tradepulsx.com"
+
 jobs:
   deploy:
     name: Build and deploy to VPS
@@ -17,45 +28,75 @@ jobs:
       - name: Setup Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Build check
-        run: npm run build
+      - name: Typecheck and build
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
           MYPLAN_UPLOAD_DIR: storage/uploads
-          MAX_UPLOAD_MB: 200
-          NEXT_PUBLIC_APP_URL: https://mynextplan.tradepulsx.com
+          MAX_UPLOAD_MB: "200"
+          NEXT_PUBLIC_APP_URL: ${{ env.NEXT_PUBLIC_APP_URL }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           DEEPSEEK_MODEL: deepseek-chat
           DEEPSEEK_BASE_URL: https://api.deepseek.com
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: |
+          npm run typecheck
+          npm run build
 
-      - name: Install sshpass and rsync
+      - name: Install deploy tools
         run: |
           sudo apt-get update
           sudo apt-get install -y sshpass rsync
 
-      - name: Prepare VPS folders
+      - name: Create production env file
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
-          sshpass -p "${{ secrets.VPS_PASSWORD }}" ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
-            mkdir -p /var/www/my-plan-project/current
-            mkdir -p /var/www/my-plan-project/shared/logs
-            mkdir -p /var/www/my-plan-project/shared/storage/uploads
+          {
+            printf 'DATABASE_URL="%s"\n' "$DATABASE_URL"
+            printf 'ADMIN_USERNAME="%s"\n' "$ADMIN_USERNAME"
+            printf 'ADMIN_PASSWORD="%s"\n' "$ADMIN_PASSWORD"
+            printf 'AUTH_SECRET="%s"\n' "$AUTH_SECRET"
+            printf 'MYPLAN_UPLOAD_DIR="storage/uploads"\n'
+            printf 'MAX_UPLOAD_MB="200"\n'
+            printf 'NEXT_PUBLIC_APP_URL="%s"\n' "$NEXT_PUBLIC_APP_URL"
+            printf 'DEEPSEEK_API_KEY="%s"\n' "$DEEPSEEK_API_KEY"
+            printf 'DEEPSEEK_MODEL="deepseek-chat"\n'
+            printf 'DEEPSEEK_BASE_URL="https://api.deepseek.com"\n'
+            printf 'NEXT_TELEMETRY_DISABLED="1"\n'
+          } > .env.production
+
+      - name: Prepare VPS folders
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          SSHPASS="$VPS_PASSWORD" sshpass -e ssh -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" "
+            mkdir -p '$APP_DIR'
+            mkdir -p '$SHARED_DIR/logs'
+            mkdir -p '$SHARED_DIR/storage/uploads'
           "
 
       - name: Upload project files to VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
         run: |
-          rsync -az --delete \
+          SSHPASS="$VPS_PASSWORD" sshpass -e rsync -az --delete \
             --exclude ".git" \
             --exclude ".github" \
             --exclude ".next" \
@@ -64,34 +105,31 @@ jobs:
             --exclude ".env.local" \
             --exclude ".env.production" \
             --exclude "storage/uploads" \
-            -e "sshpass -p '${{ secrets.VPS_PASSWORD }}' ssh -o StrictHostKeyChecking=no" \
-            ./ ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/my-plan-project/current/
+            -e "sshpass -e ssh -o StrictHostKeyChecking=no" \
+            ./ "$VPS_USER@$VPS_HOST:$APP_DIR/"
+
+      - name: Upload production env to VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          SSHPASS="$VPS_PASSWORD" sshpass -e scp -o StrictHostKeyChecking=no \
+            .env.production "$VPS_USER@$VPS_HOST:$SHARED_DIR/.env.production"
 
       - name: Install, build, init DB, and restart PM2
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
         run: |
-          sshpass -p "${{ secrets.VPS_PASSWORD }}" ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+          SSHPASS="$VPS_PASSWORD" sshpass -e ssh -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" "
             set -e
 
-            cd /var/www/my-plan-project/current
+            cd '$APP_DIR'
 
-            if [ -f /var/www/my-plan-project/shared/.env.production ]; then
-              cp /var/www/my-plan-project/shared/.env.production .env.production
-              cp /var/www/my-plan-project/shared/.env.production .env.local
-            else
-              cat > .env.production <<'EOF'
-DATABASE_URL=${{ secrets.DATABASE_URL }}
-ADMIN_USERNAME=${{ secrets.ADMIN_USERNAME }}
-ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}
-AUTH_SECRET=${{ secrets.AUTH_SECRET }}
-MYPLAN_UPLOAD_DIR=storage/uploads
-MAX_UPLOAD_MB=200
-NEXT_PUBLIC_APP_URL=https://mynextplan.tradepulsx.com
-DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
-DEEPSEEK_MODEL=deepseek-chat
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-EOF
-              cp .env.production .env.local
-            fi
+            cp '$SHARED_DIR/.env.production' .env.production
+            cp '$SHARED_DIR/.env.production' .env.local
 
             mkdir -p storage/uploads
             npm ci
@@ -105,9 +143,13 @@ EOF
           "
 
       - name: Health check
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
         run: |
-          sshpass -p "${{ secrets.VPS_PASSWORD }}" ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+          SSHPASS="$VPS_PASSWORD" sshpass -e ssh -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" "
             sleep 5
-            curl -I http://127.0.0.1:4010
+            curl -I http://127.0.0.1:$APP_PORT
             pm2 status
           "
