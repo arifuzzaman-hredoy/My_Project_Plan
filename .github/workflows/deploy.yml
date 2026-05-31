@@ -84,7 +84,7 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
         run: |
-          SSHPASS="$VPS_PASSWORD" sshpass -e ssh -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" "
+          sshpass -p "$VPS_PASSWORD" ssh -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" "
             mkdir -p '$APP_DIR'
             mkdir -p '$SHARED_DIR/logs'
             mkdir -p '$SHARED_DIR/storage/uploads'
@@ -96,7 +96,7 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
         run: |
-          SSHPASS="$VPS_PASSWORD" sshpass -e rsync -az --delete \
+          sshpass -p "$VPS_PASSWORD" rsync -az --delete \
             --exclude ".git" \
             --exclude ".github" \
             --exclude ".next" \
@@ -105,7 +105,7 @@ jobs:
             --exclude ".env.local" \
             --exclude ".env.production" \
             --exclude "storage/uploads" \
-            -e "sshpass -e ssh -o StrictHostKeyChecking=no" \
+            -e "ssh -o StrictHostKeyChecking=no" \
             ./ "$VPS_USER@$VPS_HOST:$APP_DIR/"
 
       - name: Upload production env to VPS
@@ -114,7 +114,7 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
         run: |
-          SSHPASS="$VPS_PASSWORD" sshpass -e scp -o StrictHostKeyChecking=no \
+          sshpass -p "$VPS_PASSWORD" scp -o StrictHostKeyChecking=no \
             .env.production "$VPS_USER@$VPS_HOST:$SHARED_DIR/.env.production"
 
       - name: Install, build, init DB, and restart PM2
@@ -123,7 +123,7 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
         run: |
-          SSHPASS="$VPS_PASSWORD" sshpass -e ssh -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" "
+          sshpass -p "$VPS_PASSWORD" ssh -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" "
             set -e
 
             cd '$APP_DIR'
@@ -148,7 +148,7 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
         run: |
-          SSHPASS="$VPS_PASSWORD" sshpass -e ssh -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" "
+          sshpass -p "$VPS_PASSWORD" ssh -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" "
             sleep 5
             curl -I http://127.0.0.1:$APP_PORT
             pm2 status
