@@ -1,0 +1,113 @@
+name: Deploy My Plan Project
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Build and deploy to VPS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build check
+        run: npm run build
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          MYPLAN_UPLOAD_DIR: storage/uploads
+          MAX_UPLOAD_MB: 200
+          NEXT_PUBLIC_APP_URL: https://mynextplan.tradepulsx.com
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_MODEL: deepseek-chat
+          DEEPSEEK_BASE_URL: https://api.deepseek.com
+
+      - name: Install sshpass and rsync
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sshpass rsync
+
+      - name: Prepare VPS folders
+        run: |
+          sshpass -p "${{ secrets.VPS_PASSWORD }}" ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+            mkdir -p /var/www/my-plan-project/current
+            mkdir -p /var/www/my-plan-project/shared/logs
+            mkdir -p /var/www/my-plan-project/shared/storage/uploads
+          "
+
+      - name: Upload project files to VPS
+        run: |
+          rsync -az --delete \
+            --exclude ".git" \
+            --exclude ".github" \
+            --exclude ".next" \
+            --exclude "node_modules" \
+            --exclude ".env" \
+            --exclude ".env.local" \
+            --exclude ".env.production" \
+            --exclude "storage/uploads" \
+            -e "sshpass -p '${{ secrets.VPS_PASSWORD }}' ssh -o StrictHostKeyChecking=no" \
+            ./ ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/my-plan-project/current/
+
+      - name: Install, build, init DB, and restart PM2
+        run: |
+          sshpass -p "${{ secrets.VPS_PASSWORD }}" ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+            set -e
+
+            cd /var/www/my-plan-project/current
+
+            if [ -f /var/www/my-plan-project/shared/.env.production ]; then
+              cp /var/www/my-plan-project/shared/.env.production .env.production
+              cp /var/www/my-plan-project/shared/.env.production .env.local
+            else
+              cat > .env.production <<'EOF'
+DATABASE_URL=${{ secrets.DATABASE_URL }}
+ADMIN_USERNAME=${{ secrets.ADMIN_USERNAME }}
+ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}
+AUTH_SECRET=${{ secrets.AUTH_SECRET }}
+MYPLAN_UPLOAD_DIR=storage/uploads
+MAX_UPLOAD_MB=200
+NEXT_PUBLIC_APP_URL=https://mynextplan.tradepulsx.com
+DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
+DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+EOF
+              cp .env.production .env.local
+            fi
+
+            mkdir -p storage/uploads
+            npm ci
+            npm run db:init
+            rm -rf .next
+            npm run build
+
+            pm2 delete my-plan-project || true
+            pm2 start ecosystem.config.cjs --update-env
+            pm2 save
+          "
+
+      - name: Health check
+        run: |
+          sshpass -p "${{ secrets.VPS_PASSWORD }}" ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+            sleep 5
+            curl -I http://127.0.0.1:4010
+            pm2 status
+          "
