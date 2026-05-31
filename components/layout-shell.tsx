@@ -187,6 +187,12 @@ const nav = [
     group: "Private",
   },
   {
+    href: "/automation",
+    label: { en: "Automation Hub", bn: "Automation Hub" },
+    icon: CloudCog,
+    group: "Private",
+  },
+  {
     href: "/backup",
     label: { en: "Backup", bn: "Backup" },
     icon: Archive,

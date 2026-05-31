@@ -42,6 +42,52 @@ try {
   await client.query("ALTER TABLE uploaded_files ADD COLUMN IF NOT EXISTS selected_subjects TEXT[] NOT NULL DEFAULT '{}';");
   await client.query('CREATE INDEX IF NOT EXISTS idx_field_notes_category ON field_notes(category_id);');
   await client.query('CREATE INDEX IF NOT EXISTS idx_uploaded_files_category ON uploaded_files(category_id);');
+
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS automation_settings (
+      key TEXT PRIMARY KEY,
+      value JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS automation_logs (
+      id TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL,
+      job_title TEXT NOT NULL,
+      level TEXT NOT NULL DEFAULT 'info',
+      message TEXT NOT NULL,
+      details JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS automation_notifications (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      channel TEXT NOT NULL DEFAULT 'in-app',
+      status TEXT NOT NULL DEFAULT 'pending',
+      job_id TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      read_at TIMESTAMPTZ
+    );
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS automation_job_runs (
+      id TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'running',
+      started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      finished_at TIMESTAMPTZ,
+      summary TEXT NOT NULL DEFAULT '',
+      details JSONB NOT NULL DEFAULT '{}'::jsonb
+    );
+  `);
+  await client.query('CREATE INDEX IF NOT EXISTS idx_automation_logs_created ON automation_logs(created_at DESC);');
+  await client.query('CREATE INDEX IF NOT EXISTS idx_automation_notifications_created ON automation_notifications(created_at DESC);');
+  await client.query('CREATE INDEX IF NOT EXISTS idx_automation_job_runs_started ON automation_job_runs(started_at DESC);');
+
   await client.query('COMMIT');
   console.log('✅ Database tables are ready.');
 } catch (error) {

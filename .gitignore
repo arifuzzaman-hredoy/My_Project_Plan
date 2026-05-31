@@ -34,3 +34,8 @@ storage/uploads/
 .data/
 
 tsconfig.tsbuildinfo
+
+# Python automation local env
+.venv-automation/
+automation/__pycache__/
+automation/jobs/__pycache__/

@@ -322,6 +322,7 @@ export function GlobalCommandPalette() {
       { label: "Personal Skills", href: "/personal-skills", group: "Personal", icon: UserRoundCheck },
       { label: "Cloud/DevOps", href: "/cloud-devops", group: "Fields", icon: CloudCog },
       { label: "AI Automation", href: "/ai-automation", group: "Fields", icon: Bot },
+      { label: "Automation Hub", href: "/automation", group: "System", icon: CloudCog },
       { label: "Portfolio Projects", href: "/portfolio-projects", group: "Fields", icon: Code2 },
       { label: "Security Center", href: "/security", group: "System", icon: ShieldCheck },
       { label: "Backup & Restore", href: "/backup", group: "System", icon: Archive },

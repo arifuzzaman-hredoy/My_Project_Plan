@@ -7,3 +7,6 @@ out
 storage/uploads
 npm-debug.log
 .DS_Store
+.venv-automation
+__pycache__
+*.pyc

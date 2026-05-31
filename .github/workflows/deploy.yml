@@ -76,6 +76,10 @@ jobs:
             printf 'DEEPSEEK_MODEL="deepseek-chat"\n'
             printf 'DEEPSEEK_BASE_URL="https://api.deepseek.com"\n'
             printf 'NEXT_TELEMETRY_DISABLED="1"\n'
+            printf 'AUTOMATION_ENABLED="true"\n'
+            printf 'AUTOMATION_POLL_SECONDS="60"\n'
+            printf 'AUTOMATION_APP_HEALTH_URL="http://127.0.0.1:4010/login"\n'
+            printf 'TIMEZONE="Asia/Dhaka"\n'
           } > .env.production
 
       - name: Prepare VPS folders
@@ -132,12 +136,22 @@ jobs:
             cp '$SHARED_DIR/.env.production' .env.local
 
             mkdir -p storage/uploads
+            if ! python3 -m venv --help >/dev/null 2>&1; then
+              apt-get update
+              apt-get install -y python3 python3-venv python3-pip
+            fi
             npm ci
             npm run db:init
             rm -rf .next
             npm run build
 
+            python3 -m venv .venv-automation
+            . .venv-automation/bin/activate
+            pip install --upgrade pip
+            pip install -r automation/requirements.txt
+
             pm2 delete my-plan-project || true
+            pm2 delete my-plan-automation || true
             pm2 start ecosystem.config.cjs --update-env
             pm2 save
           "
