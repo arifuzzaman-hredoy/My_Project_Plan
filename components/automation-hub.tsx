@@ -10,6 +10,9 @@ import {
   FileCheck2,
   HeartPulse,
   Loader2,
+  Mail,
+  MessageCircle,
+  Send,
   Play,
   RefreshCw,
   Rocket,
@@ -111,6 +114,8 @@ export function AutomationHub() {
   const [loading, setLoading] = useState(true);
   const [runningJob, setRunningJob] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [testingChannel, setTestingChannel] = useState<"telegram" | "email" | "all" | null>(null);
+  const [testResult, setTestResult] = useState("");
   const [error, setError] = useState("");
   const [settingsDraft, setSettingsDraft] = useState<Record<string, unknown>>({});
 
@@ -154,6 +159,30 @@ export function AutomationHub() {
       setError(err instanceof Error ? err.message : "Could not run automation job.");
     } finally {
       setRunningJob(null);
+    }
+  }
+
+  async function testNotification(channel: "telegram" | "email" | "all") {
+    setTestingChannel(channel);
+    setTestResult("");
+    setError("");
+    try {
+      const response = await fetch("/api/automation/test-notification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel }),
+      });
+      const json = await response.json();
+      const summary = (json.results || [])
+        .map((item: { channel: string; ok: boolean; message: string }) => `${item.channel}: ${item.ok ? "OK" : "FAILED"} - ${item.message}`)
+        .join(" | ");
+      if (!response.ok) throw new Error(json.error || "Notification test failed.");
+      setTestResult(summary || "Notification test completed.");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send test notification.");
+    } finally {
+      setTestingChannel(null);
     }
   }
 
@@ -359,6 +388,79 @@ export function AutomationHub() {
                 <p className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm text-slate-400">No notifications yet. Run a job to create one.</p>
               ) : null}
             </div>
+          </Card>
+
+
+          <Card className="border-cyan-300/15 bg-cyan-950/20">
+            <div className="flex items-center gap-3">
+              <MessageCircle className="h-5 w-5 text-cyan-300" />
+              <h2 className="text-xl font-black text-white">Notification Test Lab</h2>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-slate-300">
+              Telegram/Gmail message দেখতে হলে শুধু Run Now দিলেই হবে না; worker বা test sender credentials পেতে হবে. নিচের test button দিয়ে direct delivery check করো.
+            </p>
+            <div className="mt-4 grid gap-2 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
+              <button
+                onClick={() => testNotification("telegram")}
+                disabled={Boolean(testingChannel)}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-cyan-300/25 bg-cyan-400/10 px-3 py-3 text-xs font-black text-cyan-100 transition hover:bg-cyan-400/20 disabled:opacity-50"
+              >
+                {testingChannel === "telegram" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                Test Telegram
+              </button>
+              <button
+                onClick={() => testNotification("email")}
+                disabled={Boolean(testingChannel)}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-300/25 bg-emerald-400/10 px-3 py-3 text-xs font-black text-emerald-100 transition hover:bg-emerald-400/20 disabled:opacity-50"
+              >
+                {testingChannel === "email" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+                Test Gmail
+              </button>
+              <button
+                onClick={() => testNotification("all")}
+                disabled={Boolean(testingChannel)}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-400 to-emerald-400 px-3 py-3 text-xs font-black text-slate-950 transition hover:-translate-y-0.5 disabled:opacity-50"
+              >
+                {testingChannel === "all" ? <Loader2 className="h-4 w-4 animate-spin" /> : <BellRing className="h-4 w-4" />}
+                Test All
+              </button>
+            </div>
+            {testResult ? (
+              <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.04] p-3 text-xs font-bold leading-5 text-slate-200">
+                {testResult}
+              </div>
+            ) : null}
+          </Card>
+
+          <Card className="border-white/14 bg-slate-900/50">
+            <div className="flex items-center gap-3">
+              <ShieldCheck className="h-5 w-5 text-emerald-300" />
+              <h2 className="text-xl font-black text-white">How you will see automation</h2>
+            </div>
+            <div className="mt-4 space-y-3 text-sm leading-6 text-slate-300">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
+                <p className="font-black text-white">1. In-app</p>
+                <p>এই page-এর Notifications + Recent Logs section-এ সবসময় result দেখাবে.</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
+                <p className="font-black text-white">2. Telegram</p>
+                <p><code className="text-cyan-200">TELEGRAM_BOT_TOKEN</code> এবং <code className="text-cyan-200">TELEGRAM_CHAT_ID</code> set থাকলে phone/desktop Telegram-এ message যাবে.</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
+                <p className="font-black text-white">3. Gmail</p>
+                <p>Gmail App Password দিয়ে <code className="text-cyan-200">EMAIL_USER</code>, <code className="text-cyan-200">EMAIL_PASS</code>, <code className="text-cyan-200">EMAIL_TO</code> set করলে inbox-এ mail আসবে.</p>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="border-amber-300/15 bg-amber-950/20">
+            <div className="flex items-center gap-3">
+              <Clock3 className="h-5 w-5 text-amber-200" />
+              <h2 className="text-xl font-black text-white">Worker rule</h2>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-slate-300">
+              Localhost-এ automatic scheduled message দেখতে হলে আলাদা terminal-এ <code className="text-amber-100">python automation/worker.py</code> চালাতে হবে. Live VPS-এ deploy হলে PM2 process <code className="text-amber-100">my-plan-automation</code> online থাকতে হবে.
+            </p>
           </Card>
         </div>
       </div>
